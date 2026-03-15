@@ -20,7 +20,7 @@ No virtual environment is needed to run this—just Python, and you can easily d
 """)
 
 st.sidebar.header("📁 Upload Data")
-uploaded_file = st.sidebar.file_upload("Upload your dataset (CSV or Excel)", type=["csv", "xlsx", "xls"])
+uploaded_file = st.sidebar.file_uploader("Upload your dataset (CSV or Excel)", type=["csv", "xlsx", "xls"])
 
 if uploaded_file is not None:
     # Read data
