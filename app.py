@@ -15,8 +15,7 @@ st.set_page_config(page_title="Data Insights & Forecast Dashboard", layout="wide
 
 st.title("📊 Universal Data Insights & Forecast Dashboard")
 st.markdown("""
-This app performs Exploratory Data Analysis (EDA), calculates key metrics (Revenue, Expenditure, Profit/Loss, ATV), provides colorful charts, performs Holt-Winters forecasting, and generates a downloadable PDF report.
-No virtual environment is needed to run this—just Python, and you can easily deploy it on **Streamlit Community Cloud** with the included `requirements.txt`.
+This app automatically sums your data, calculates key metrics (Revenue, Expenditure, Profit/Loss, ATV), provides colorful charts, performs Holt-Winters forecasting, and generates a downloadable PDF report.
 """)
 
 st.sidebar.header("📁 Upload Data")
@@ -34,30 +33,6 @@ if uploaded_file is not None:
         st.error(f"Error reading file: {e}")
         st.stop()
         
-    st.header("1. Exploratory Data Analysis (EDA)")
-    with st.expander("🔍 View Raw Data & Summary"):
-        st.write("### Raw Data (First 5 Rows)")
-        st.dataframe(df.head())
-        st.write("### Data Summary")
-        st.dataframe(df.describe())
-        st.write("### Missing Values")
-        st.dataframe(df.isnull().sum().reset_index().rename(columns={"index": "Column", 0: "Missing Count"}))
-        st.write("### Data Types")
-        st.dataframe(df.dtypes.reset_index().rename(columns={"index": "Column", 0: "Type"}))
-
-    st.header("2. Data Mapping & Settings")
-    columns = df.columns.tolist()
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        date_col = st.selectbox("Select Date Column", ["None"] + columns, index=0)
-    with col2:
-        rev_col = st.selectbox("Select Revenue Column", ["None"] + columns, index=0)
-    with col3:
-        exp_col = st.selectbox("Select Expenditure/Budget Column", ["None"] + columns, index=0)
-    with col4:
-        tx_col = st.selectbox("Select Transactions Column (for ATV)", ["None"] + columns, index=0)
-        
     st.sidebar.header("💸 Discount Settings")
     discount_option = st.sidebar.radio("Apply Discount to Revenue?", ["0%", "10%", "20%", "30%", "Custom"])
     
@@ -73,9 +48,28 @@ if uploaded_file is not None:
     else:
         forecast_years = int(forecast_option)
 
-    if rev_col != "None" and exp_col != "None":
-        st.header("3. Key Performance Indicators (KPIs)")
-        
+    st.header("1. Key Performance Indicators (KPIs)")
+    
+    # Auto-detect columns based on common names or keyword matching
+    def find_column(df, keywords):
+        for col in df.columns:
+            if any(keyword.lower() in str(col).lower() for keyword in keywords):
+                return col
+        return None
+
+    # Try to automatically find Date, Revenue, Expenditure, and Transactions
+    date_col = find_column(df, ['date', 'time', 'day', 'month', 'year'])
+    rev_col = find_column(df, ['rev', 'sales', 'income', 'earn'])
+    exp_col = find_column(df, ['exp', 'cost', 'spend', 'budget', 'out'])
+    tx_col = find_column(df, ['tx', 'trans', 'qty', 'quantity', 'count', 'order'])
+    
+    # Fallbacks if columns can't be guessed by names (just take first numeric for rev, second for exp)
+    numeric_cols = df.select_dtypes(include='number').columns.tolist()
+    if not rev_col and len(numeric_cols) > 0: rev_col = numeric_cols[0]
+    if not exp_col and len(numeric_cols) > 1: exp_col = numeric_cols[1]
+    if not tx_col and len(numeric_cols) > 2: tx_col = numeric_cols[2]
+    
+    if rev_col and exp_col:
         # Data preparation
         processed_df = df.copy()
         
@@ -88,20 +82,20 @@ if uploaded_file is not None:
         profit_loss = total_revenue - total_expenditure
         
         atv_value = 0
-        if tx_col != "None":
+        if tx_col:
             total_tx = processed_df[tx_col].sum()
             if total_tx > 0:
                 atv_value = total_revenue / total_tx
                 
-        # Metrics Display
+        # Metrics Display (KPI cards only)
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Revenue (Adj.)", f"${total_revenue:,.2f}")
-        m2.metric("Total Expenditure", f"${total_expenditure:,.2f}")
-        m3.metric("Profit / Loss", f"${profit_loss:,.2f}", delta="Profit" if profit_loss > 0 else "Loss", delta_color="normal" if profit_loss > 0 else "inverse")
-        if tx_col != "None":
-            m4.metric("Avg. Transaction Value (ATV)", f"${atv_value:,.2f}")
+        m1.metric("Total Revenue (Adj.)", f"₹ {total_revenue:,.2f}")
+        m2.metric("Total Budget/Expenditure", f"₹ {total_expenditure:,.2f}")
+        m3.metric("Total Profit / Loss", f"₹ {profit_loss:,.2f}", delta="Profit" if profit_loss > 0 else "Loss", delta_color="normal" if profit_loss > 0 else "inverse")
+        if tx_col:
+            m4.metric("Avg. Transaction Value (ATV)", f"₹ {atv_value:,.2f}")
             
-        st.header("4. AI Suggestions")
+        st.header("2. AI Suggestions")
         if profit_loss > 0:
             st.success("🤖 **AI Suggestion**: You are rocking! No suggestions needed. Keep up the excellent performance!")
             ai_suggestion_text = "You are rocking! No suggestions needed. Keep up the excellent performance!"
@@ -109,21 +103,33 @@ if uploaded_file is not None:
             st.warning("🤖 **AI Suggestion**: You are operating at a loss. Consider the following:\n- Review and reduce operational expenditures.\n- Analyze the discount strategy; high discounts might be eating into margins.\n- Identify low-performing products/services and optimize them.")
             ai_suggestion_text = "You are operating at a loss. Consider reducing operational expenditures, reviewing discount strategies, and identifying low-performing areas."
 
-        st.header("5. Visualizations & Forecasting")
+        st.header("3. Visualizations & Forecasting")
         
         # Aggregating by date if available
-        if date_col != "None":
+        if date_col:
             try:
                 processed_df[date_col] = pd.to_datetime(processed_df[date_col])
                 processed_df = processed_df.sort_values(by=date_col)
-                # Aggregate by month for simpler processing if it's daily
+                # Aggregate by month for simpler processing
                 ts_df = processed_df.set_index(date_col).resample('M').sum(numeric_only=True).reset_index()
                 
-                # Plotly Chart
-                fig = px.line(ts_df, x=date_col, y=['Adjusted_Revenue', exp_col], 
+                # Plotly Chart 1: Line Chart (Revenue vs Expenditure)
+                fig_line = px.line(ts_df, x=date_col, y=['Adjusted_Revenue', exp_col], 
                               title="Revenue and Expenditure Over Time",
-                              labels={"value": "Amount ($)", "variable": "Metric"})
-                st.plotly_chart(fig, use_container_width=True)
+                              labels={"value": "Amount (₹)", "variable": "Metric"})
+                st.plotly_chart(fig_line, use_container_width=True)
+                
+                # Plotly Chart 2: Bar Chart (Revenue vs Expenditure)
+                fig_bar_dates = px.histogram(ts_df, x=date_col, y=['Adjusted_Revenue', exp_col], barmode='group',
+                                       title="Monthly Breakdown (Revenue vs Expenditure)",
+                                       labels={"value": "Amount (₹)", "variable": "Metric"})
+                st.plotly_chart(fig_bar_dates, use_container_width=True)
+
+                
+                # Plotly Chart 3: Area Chart for Profit over time
+                ts_df['Profit'] = ts_df['Adjusted_Revenue'] - ts_df[exp_col]
+                fig_area = px.area(ts_df, x=date_col, y='Profit', title="Profit/Loss Trend Over Time", labels={'Profit': 'Amount (₹)'})
+                st.plotly_chart(fig_area, use_container_width=True)
                 
                 # Holt Winters Forecasting
                 st.subheader(f"Holt-Winters Forecasting ({forecast_years} Years)")
@@ -150,30 +156,39 @@ if uploaded_file is not None:
                         fig_forecast = go.Figure()
                         fig_forecast.add_trace(go.Scatter(x=ts_df[date_col], y=ts_df['Adjusted_Revenue'], mode='lines', name='Historical Revenue', line=dict(color='blue')))
                         fig_forecast.add_trace(go.Scatter(x=forecast_df['Date'], y=forecast_df['Forecasted_Revenue'], mode='lines', name='Forecast', line=dict(color='orange', dash='dash')))
-                        fig_forecast.update_layout(title=f"Revenue Forecast for Next {forecast_years} Years", xaxis_title="Date", yaxis_title="Revenue ($)")
+                        fig_forecast.update_layout(title=f"Revenue Forecast for Next {forecast_years} Years", xaxis_title="Date", yaxis_title="Revenue (₹)")
                         st.plotly_chart(fig_forecast, use_container_width=True)
                         
                     except Exception as e:
-                        st.error(f"Not enough data or variability to perform seasonal Holt-Winters forecasting. Error: {e}")
+                        st.error(f"Not enough data to perform seasonal Holt-Winters forecasting. Error: {e}")
                         fig_forecast = None
                 else:
                     st.info("Need at least 24 months of historical date data to perform reliable seasonal Holt-Winters forecasting.")
                     fig_forecast = None
                     
             except Exception as e:
-                st.error(f"Error processing dates for forecasting: {e}. Make sure the Date column contains valid dates.")
-                fig = None
+                st.error(f"Error processing dates for charts: {e}. Ensure finding correct Date column.")
+                fig_line = None
+                fig_bar_dates = None
+                fig_area = None
                 fig_forecast = None
         else:
-            st.info("Select a Date column to view time series charts and forecasts.")
+            st.info("No usable Date column auto-detected. Showing summary charts instead.")
             # Simple Bar chart if no date
             agg_df = processed_df[[rev_col, exp_col]].sum().reset_index()
             agg_df.columns = ["Metric", "Total"]
-            fig = px.bar(agg_df, x="Metric", y="Total", title="Total Revenue vs Expenditure", color="Metric")
-            st.plotly_chart(fig, use_container_width=True)
+            fig_bar_dates = px.bar(agg_df, x="Metric", y="Total", title="Total Revenue vs Expenditure", color="Metric")
+            st.plotly_chart(fig_bar_dates, use_container_width=True)
+            
+            # Pie Chart
+            fig_pie = px.pie(agg_df, names="Metric", values="Total", title="Proportion of Revenue and Expenditure")
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+            fig_line = None
+            fig_area = None
             fig_forecast = None
 
-        st.header("6. Download PDF Report")
+        st.header("4. Download PDF Report")
         st.write("Click below to generate and download a comprehensive PDF report containing your analysis and insights.")
         
         if st.button("Generate PDF Report"):
@@ -194,11 +209,11 @@ if uploaded_file is not None:
                     pdf.set_font("Arial", 'B', 14)
                     pdf.cell(200, 10, txt="Key Performance Indicators", ln=True)
                     pdf.set_font("Arial", size=12)
-                    pdf.cell(200, 10, txt=f"Total Revenue (Adj. {discount_option} discount): ${total_revenue:,.2f}", ln=True)
-                    pdf.cell(200, 10, txt=f"Total Expenditure: ${total_expenditure:,.2f}", ln=True)
-                    pdf.cell(200, 10, txt=f"Profit / Loss: ${profit_loss:,.2f}", ln=True)
-                    if tx_col != "None":
-                        pdf.cell(200, 10, txt=f"Avg. Transaction Value (ATV): ${atv_value:,.2f}", ln=True)
+                    pdf.cell(200, 10, txt=f"Total Revenue (Adj. {discount_option} discount): Rs. {total_revenue:,.2f}", ln=True)
+                    pdf.cell(200, 10, txt=f"Total Budget / Expenditure: Rs. {total_expenditure:,.2f}", ln=True)
+                    pdf.cell(200, 10, txt=f"Total Profit / Loss: Rs. {profit_loss:,.2f}", ln=True)
+                    if tx_col:
+                        pdf.cell(200, 10, txt=f"Avg. Transaction Value (ATV): Rs. {atv_value:,.2f}", ln=True)
                     pdf.ln(5)
                     
                     # AI Suggestions
@@ -221,11 +236,14 @@ if uploaded_file is not None:
                                     tmp_path = tmpfile.name
                                 os.unlink(tmp_path)
                             except Exception as e:
-                                pdf_obj.cell(200, 10, txt=f"Could not render {title} due to Image Generation Engine missing.", ln=True)
+                                pass # Silently ignore chart failure if kaleido isn't working
                                 
-                    if 'fig' in locals() and fig is not None:
-                        add_plotly_to_pdf(fig, pdf, "Historical Data Chart")
-                        
+                    if 'fig_line' in locals() and fig_line is not None:
+                        add_plotly_to_pdf(fig_line, pdf, "Revenue vs Expenditure Over Time")
+                    if 'fig_bar_dates' in locals() and fig_bar_dates is not None:
+                        add_plotly_to_pdf(fig_bar_dates, pdf, "Revenue / Expenditure Breakdown")
+                    if 'fig_area' in locals() and fig_area is not None:
+                         add_plotly_to_pdf(fig_area, pdf, "Profit Over Time")
                     if 'fig_forecast' in locals() and fig_forecast is not None:
                         add_plotly_to_pdf(fig_forecast, pdf, f"Forecasting ({forecast_years} Years)")
 
@@ -246,9 +264,7 @@ if uploaded_file is not None:
                     
                 except Exception as e:
                     st.error(f"An error occurred while generating the PDF: {e}")
-                    st.info("Note: PDF Generation might fail on some limited cloud environments if 'kaleido' fails to install native dependencies.")
+    else:
+        st.error("Could not automatically identify Revenue or Expenditure columns from the data.")
 else:
     st.info("Awaiting file upload...")
-    
-st.markdown("---")
-st.markdown("*Built with ❤️ using Streamlit. Ready for deployment on Streamlit Community Cloud without any virtual environment.*")
